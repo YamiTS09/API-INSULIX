@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response } from 'express'; // Importamos tipos
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
@@ -14,11 +14,11 @@ const port = process.env.PORT || 3002;
 app.use(cors());
 app.use(express.json());
 
-// Conexión a MongoDB
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://admin:secretpassword@localhost:27017/insulix_dietas?authSource=admin';
+// Conexión a MongoDB corregida para producción
+const MONGO_URI = process.env.MONGO_URI as string; // 'as string' evita error de process
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('Connected to MongoDB - Dietas Service'))
-  .catch((err) => console.error('Error connecting to MongoDB:', err));
+  .then(() => console.log('✅ Connected to MongoDB - Dietas Service'))
+  .catch((err) => console.error('❌ Error connecting to MongoDB:', err));
 
 // Configuracion de Swagger
 const swaggerOptions = {
@@ -31,7 +31,8 @@ const swaggerOptions = {
         },
         servers: [
             {
-                url: `http://localhost:${port}`,
+                // Agregamos la URL de Render para que Swagger funcione en la nube
+                url: process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`,
             },
         ],
     },
@@ -43,7 +44,8 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 app.use('/dietas', dietasRoutes);
 
-app.get('/health', (req, res) => {
+// Agregamos tipos (Request, Response) para evitar error TS7006
+app.get('/health', (req: Request, res: Response) => {
     const dbState = mongoose.connection.readyState;
     res.status(200).json({ status: 'UP', database: dbState === 1 ? 'connected' : 'disconnected' });
 });
