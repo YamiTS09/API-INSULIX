@@ -1,13 +1,15 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
+
 dotenv.config();
 
 export const pool = new Pool({
-  user: process.env.DB_USER || 'admin',
-  host: process.env.DB_HOST || 'localhost',
-  database: process.env.DB_NAME || 'insulix_db',
-  password: process.env.DB_PASSWORD || 'secretpassword',
-  port: Number(process.env.DB_PORT) || 5432,
+    // Usamos la URL completa que Render nos da
+    connectionString: process.env.DATABASE_URL as string,
+    // Obligatorio para bases de datos en la nube
+    ssl: {
+        rejectUnauthorized: false
+    }
 });
 
 // Inicializar tablas según el nuevo esquema propuesto
@@ -23,21 +25,20 @@ const initializeDb = async () => {
                 CREATE TYPE diabetes_tipo AS ENUM ('Tipo 1', 'Tipo 2', 'Gestacional', 'Otro');
             EXCEPTION WHEN duplicate_object THEN null; END $$;
 
--- MÓDULO A: SEGURIDAD Y ACCESO
-CREATE TABLE IF NOT EXISTS roles (
-    rol_id SERIAL PRIMARY KEY,
-    nombre_rol VARCHAR(20) UNIQUE NOT NULL,
-    descripcion VARCHAR(255)
-    -- Eliminamos cualquier CHECK manual aquí para evitar el error previo
-);
+            -- MÓDULO A: SEGURIDAD Y ACCESO
+            CREATE TABLE IF NOT EXISTS roles (
+                rol_id SERIAL PRIMARY KEY,
+                nombre_rol VARCHAR(20) UNIQUE NOT NULL,
+                descripcion VARCHAR(255)
+            );
 
--- Aseguramos que los nombres coincidan exactamente con lo que busca tu controlador
-INSERT INTO roles (nombre_rol, descripcion) 
-VALUES 
-    ('ADMIN', 'Acceso total a la plataforma web'),
-    ('MEDICO', 'Acceso a gestión de pacientes y prescripciones (Web y Móvil)'),
-    ('PACIENTE', 'Acceso a consulta de historial y tratamiento (Móvil)')
-ON CONFLICT (nombre_rol) DO NOTHING;
+            -- Aseguramos los roles iniciales
+            INSERT INTO roles (nombre_rol, descripcion) 
+            VALUES 
+                ('ADMIN', 'Acceso total a la plataforma web'),
+                ('MEDICO', 'Acceso a gestión de pacientes y prescripciones (Web y Móvil)'),
+                ('PACIENTE', 'Acceso a consulta de historial y tratamiento (Móvil)')
+            ON CONFLICT (nombre_rol) DO NOTHING;
 
             CREATE TABLE IF NOT EXISTS usuario (
                 usuario_id VARCHAR(50) PRIMARY KEY, -- Firebase UID
@@ -86,7 +87,7 @@ ON CONFLICT (nombre_rol) DO NOTHING;
                 foto_url VARCHAR(500)
             );
 
-            -- Triggers para updated_at (Evitamos crearlo si ya existe usando OR REPLACE)
+            -- Triggers para updated_at
             CREATE OR REPLACE FUNCTION update_updated_at()
             RETURNS TRIGGER AS $$
             BEGIN
@@ -113,7 +114,6 @@ ON CONFLICT (nombre_rol) DO NOTHING;
             );
 
             CREATE INDEX IF NOT EXISTS idx_codigos_usuario ON codigos_verificacion(usuario_id);
-
         `);
         console.log("Database schema updated with new unified model (Roles, Usuario, Detalle_Medico, Detalle_Paciente)");
     } catch (err) {
