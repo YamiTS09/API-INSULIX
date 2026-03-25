@@ -1,0 +1,123 @@
+version: "3.8"
+
+services:
+  postgres_db:
+    image: postgres:15
+    container_name: postgres_insulix
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: insulix_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d/
+    networks:
+      - insulix_network
+    restart: unless-stopped
+
+  mongo_db:
+    image: mongo:6
+    container_name: mongo_insulix
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: secretpassword
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - insulix_network
+    restart: unless-stopped
+
+  auth-service:
+    build: ./auth-service
+    container_name: auth_insulix
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DB_USER=admin
+      - DB_PASSWORD=secretpassword
+      - DB_HOST=postgres_db
+      - DB_NAME=insulix_db
+      - DB_PORT=5432
+      - JWT_SECRET=super_secret_insulix_jwt_key_2026
+    depends_on:
+      - postgres_db
+    networks:
+      - insulix_network
+    restart: unless-stopped
+
+  users-service:
+    build: ./users-service
+    container_name: users_insulix
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - DB_USER=admin
+      - DB_PASSWORD=secretpassword
+      - DB_HOST=postgres_db
+      - DB_NAME=insulix_db
+      - DB_PORT=5432
+      - AUTH_SERVICE_URL=http://auth-service:3000
+      - JWT_SECRET=super_secret_insulix_jwt_key_2026
+    depends_on:
+      - postgres_db
+    networks:
+      - insulix_network
+    restart: unless-stopped
+
+  dietas-service:
+    build: ./dietas-service
+    container_name: dietas_insulix
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - MONGO_URI=mongodb://admin:secretpassword@mongo_db:27017/insulix_dietas?authSource=admin
+      - AUTH_SERVICE_URL=http://auth-service:3000
+    depends_on:
+      - mongo_db
+    networks:
+      - insulix_network
+    restart: unless-stopped
+
+  actividad-service:
+    build: ./actividad-service
+    container_name: actividad_insulix
+    ports:
+      - "3003:3003"
+    environment:
+      - PORT=3003
+      - MONGO_URI=mongodb://admin:secretpassword@mongo_db:27017/insulix_actividad?authSource=admin
+      - AUTH_SERVICE_URL=http://auth-service:3000
+    depends_on:
+      - mongo_db
+    networks:
+      - insulix_network
+    restart: unless-stopped
+
+  reportes-service:
+    build: ./reportes-service
+    container_name: reportes_insulix
+    ports:
+      - "3004:3004"
+    environment:
+      - PORT=3004
+      - MONGO_URI=mongodb://admin:secretpassword@mongo_db:27017/insulix_reportes?authSource=admin
+    depends_on:
+      - mongo_db
+    networks:
+      - insulix_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  mongo_data:
+
+networks:
+  insulix_network:
+    driver: bridge

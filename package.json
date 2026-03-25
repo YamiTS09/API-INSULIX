@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "firebase": "^12.10.0",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10"
+  }
+}

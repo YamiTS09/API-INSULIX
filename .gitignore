@@ -1,0 +1,5 @@
+# Bloquear archivos sensibles en cualquier carpeta
+.env
+serviceAccountKey.json
+node_modules/
+dist/
