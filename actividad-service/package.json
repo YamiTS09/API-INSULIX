@@ -12,6 +12,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "jsonwebtoken": "^9.0.3",
     "axios": "^1.13.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -21,6 +22,7 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.5.5",

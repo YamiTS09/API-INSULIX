@@ -1,36 +1,45 @@
 import { Request, Response, NextFunction } from 'express';
-import axios from 'axios';
+import jwt from 'jsonwebtoken';
 
-export const authenticateToken = async (req: Request, res: Response, next: NextFunction) => {
+export interface AuthRequest extends Request {
+    user?: any;
+}
+
+export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ 
-            message: 'Acceso denegado. Se requiere un token de autenticación (Bearer).' 
+    if (authHeader) {
+        const token = authHeader.split(' ')[1]; // Formato: Bearer <token>
+        const secret = process.env.JWT_SECRET || 'fallback_secret';
+
+        jwt.verify(token, secret, (err, user) => {
+            if (err) {
+                return res.status(403).json({ message: 'Token inválido o expirado' });
+            }
+
+            // Guardar info del usuario decodificada en el request
+            req.user = user;
+            next();
         });
+    } else {
+        res.status(401).json({ message: 'Se requiere token de autenticación (Authorization: Bearer <token>)' });
     }
+};
 
-    try {
-        // En un esquema de microservicios, delegamos la validación del JWT al auth-service.
-        // auth-service debe estar corriendo en el puerto 3000 (o el configurado).
-        const authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://localhost:3000';
-        
-        const response = await axios.get(`${authServiceUrl}/verify`, {
-            headers: { Authorization: authHeader }
-        });
+/**
+ * Middleware opcional para asegurar roles (RBAC)
+ * Se asume que authenticateToken se ejecutó antes.
+ */
+export const requireRole = (roles: string[]) => {
+    return (req: AuthRequest, res: Response, next: NextFunction) => {
+        if (!req.user || !req.user.role) {
+            return res.status(403).json({ message: 'No tienes el rol necesario para acceder' });
+        }
 
-        // Si el token es válido, auth-service devuelve status 200 y los datos del usuario.
-        if (response.data && response.data.valid) {
-            (req as any).user = response.data.user;
+        if (roles.includes(req.user.role)) {
             next();
         } else {
-            return res.status(403).json({ message: 'Token inválido o expirado.' });
+            return res.status(403).json({ message: 'Acceso denegado: Rol insuficiente' });
         }
-    } catch (error: any) {
-        console.error('Error al verificar token con auth-service:', error.message);
-        return res.status(403).json({ 
-            message: 'Token inválido o expirado, o refutado por el auth-service.', 
-            error: error.response?.data || error.message 
-        });
-    }
+    };
 };
