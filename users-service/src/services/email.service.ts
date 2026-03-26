@@ -1,17 +1,6 @@
-import nodemailer from 'nodemailer';
-import dotenv from 'dotenv';
+import { Resend } from 'resend';
 
-dotenv.config();
-
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export const sendVerificationEmail = async (email: string, code: string) => {
     const htmlContent = `
@@ -22,13 +11,13 @@ export const sendVerificationEmail = async (email: string, code: string) => {
         </div>
         <div style="background-color: #f8f9fa; padding: 30px; border-radius: 8px; text-align: center;">
             <h2 style="color: #2c3e50; font-size: 20px; margin-top: 0;">Código de Verificación</h2>
-            <p style="color: #34495e; font-size: 16px;">Para continuar con tu inicio de sesión, utiliza el siguiente código de 6 dígitos:</p>
+            <p style="color: #34495e; font-size: 16px;">Para continuar, utiliza el siguiente código de 6 dígitos:</p>
             <div style="font-size: 36px; font-weight: bold; color: #3498db; letter-spacing: 10px; margin: 20px 0; padding: 10px; border: 2px dashed #3498db; display: inline-block; background-color: #e8f4fd; border-radius: 5px;">
                 ${code}
             </div>
             <p style="color: #e74c3c; font-size: 12px; font-weight: bold;">Este código expira en 5 minutos.</p>
         </div>
-        <p style="color: #7f8c8d; font-size: 14px; margin-top: 20px;">Si no solicitaste este código, por favor ignora este correo o contacta a soporte.</p>
+        <p style="color: #7f8c8d; font-size: 14px; margin-top: 20px;">Si no solicitaste este código, ignora este correo o contacta a soporte.</p>
         <hr style="border: 0; border-top: 1px solid #e0e0e0; margin: 30px 0;">
         <div style="text-align: center; color: #95a5a6; font-size: 12px;">
             © 2026 INSULIX - Todos los derechos reservados
@@ -36,15 +25,19 @@ export const sendVerificationEmail = async (email: string, code: string) => {
     </div>
     `;
 
-    const mailOptions = {
-        from: `"Insulix Security" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: 'Tu código de seguridad de Insulix',
-        html: htmlContent,
-    };
-
     try {
-        await transporter.sendMail(mailOptions);
+        const { error } = await resend.emails.send({
+            from: 'Insulix Security <onboarding@resend.dev>',
+            to: email,
+            subject: 'Tu código de seguridad de Insulix',
+            html: htmlContent,
+        });
+
+        if (error) {
+            console.error('Error enviando email con Resend:', error);
+            throw new Error('No se pudo enviar el correo de verificación');
+        }
+
         console.log(`Email enviado exitosamente a ${email}`);
     } catch (error) {
         console.error('Error enviando email:', error);
