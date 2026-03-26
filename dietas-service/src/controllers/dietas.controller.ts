@@ -63,7 +63,7 @@ export const getAsignacionesDieta = async (req: Request, res: Response) => {
     try {
         const { paciente_id } = req.query;
         let query = {};
-        if (paciente_id) query = { paciente_id: Number(paciente_id) };
+        if (paciente_id) query = { paciente_id: paciente_id as string };
 
         const asignaciones = await AsignacionDieta.find(query).populate('dieta_id');
         res.status(200).json(asignaciones);
