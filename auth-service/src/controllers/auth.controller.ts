@@ -126,7 +126,9 @@ export const deleteFirebaseUser = async (req: Request, res: Response) => {
             return res.status(400).json({ message: 'UID es requerido' });
         }
         
-        await admin.auth().deleteUser(uid);
+        // Agregamos "as string" para solucionar el error TS2345
+        await admin.auth().deleteUser(uid as string); 
+        
         return res.status(200).json({ message: 'Usuario eliminado de Firebase' });
     } catch (error: any) {
         if (error.code === 'auth/user-not-found') {

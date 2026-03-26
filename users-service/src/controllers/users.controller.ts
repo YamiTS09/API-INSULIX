@@ -298,9 +298,9 @@ export const updatePaciente = async (req: Request, res: Response) => {
 export const deletePaciente = async (req: Request, res: Response) => {
     try {
          const { id } = req.params;
-         // 1. Desactivación lógica en Postgres
+         // 1. Eliminación física en Postgres (borrado en cascada)
          const result = await pool.query(
-            'UPDATE usuario SET is_active = false WHERE usuario_id = $1 RETURNING *',
+            'DELETE FROM usuario WHERE usuario_id = $1 RETURNING *',
             [id]
          );
          
@@ -329,7 +329,7 @@ export const deletePaciente = async (req: Request, res: Response) => {
              console.error('Error contacting auth-service to delete Firebase user:', firebaseErr.message);
          }
 
-         res.status(200).json({ message: 'Paciente desactivado localmente y eliminado de Firebase', usuario: result.rows[0] });
+         res.status(200).json({ message: 'Paciente eliminado físicamente de la base de datos y de Firebase', usuario: result.rows[0] });
      } catch (error) {
          res.status(500).json({ error: 'Error borrando al paciente' });
      }
