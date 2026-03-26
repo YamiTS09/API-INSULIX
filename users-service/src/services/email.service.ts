@@ -1,8 +1,9 @@
-import { Resend } from 'resend';
+import https from 'https';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const BREVO_API_KEY = process.env.BREVO_API_KEY || '';
+const SENDER_EMAIL = 'insulix.contacto@gmail.com';
 
-export const sendVerificationEmail = async (email: string, code: string) => {
+export const sendVerificationEmail = async (email: string, code: string): Promise<void> => {
     const htmlContent = `
     <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #ffffff;">
         <div style="text-align: center; margin-bottom: 20px;">
@@ -25,22 +26,45 @@ export const sendVerificationEmail = async (email: string, code: string) => {
     </div>
     `;
 
-    try {
-        const { error } = await resend.emails.send({
-            from: 'Insulix Security <onboarding@resend.dev>',
-            to: email,
-            subject: 'Tu código de seguridad de Insulix',
-            html: htmlContent,
+    const payload = JSON.stringify({
+        sender: { name: 'Insulix Security', email: SENDER_EMAIL },
+        to: [{ email }],
+        subject: 'Tu código de seguridad de Insulix',
+        htmlContent
+    });
+
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: 'api.brevo.com',
+            path: '/v3/smtp/email',
+            method: 'POST',
+            headers: {
+                'api-key': BREVO_API_KEY,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload)
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let body = '';
+            res.on('data', (chunk) => body += chunk);
+            res.on('end', () => {
+                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                    console.log(`Email enviado exitosamente a ${email} via Brevo`);
+                    resolve();
+                } else {
+                    console.error(`Error de Brevo (${res.statusCode}):`, body);
+                    reject(new Error(`No se pudo enviar el correo de verificación`));
+                }
+            });
         });
 
-        if (error) {
-            console.error('Error enviando email con Resend:', error);
-            throw new Error('No se pudo enviar el correo de verificación');
-        }
+        req.on('error', (err) => {
+            console.error('Error de red al contactar Brevo:', err);
+            reject(new Error('No se pudo enviar el correo de verificación'));
+        });
 
-        console.log(`Email enviado exitosamente a ${email}`);
-    } catch (error) {
-        console.error('Error enviando email:', error);
-        throw new Error('No se pudo enviar el correo de verificación');
-    }
+        req.write(payload);
+        req.end();
+    });
 };
