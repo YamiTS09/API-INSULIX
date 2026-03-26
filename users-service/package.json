@@ -22,9 +22,7 @@
     "multer-storage-cloudinary": "^4.0.0",
     "pg": "^8.13.0",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
-  },
-  "devDependencies": {
+    "swagger-ui-express": "^5.0.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
