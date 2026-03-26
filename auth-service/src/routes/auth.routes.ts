@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { login, verifyToken, logout, checkUserExists } from '../controllers/auth.controller';
+import { login, verifyToken, logout, checkUserExists, deleteFirebaseUser } from '../controllers/auth.controller';
 
 const router = Router();
 
@@ -89,5 +89,28 @@ router.get('/verify', verifyToken);
  *         description: Logout exitoso
  */
 router.post('/logout', logout);
+
+/**
+ * @swagger
+ * /firebase/{uid}:
+ *   delete:
+ *     summary: Eliminar usuario de Firebase Auth
+ *     description: Borra la cuenta de un usuario en Firebase Auth usando su UID.
+ *     tags: [Autenticación]
+ *     parameters:
+ *       - in: path
+ *         name: uid
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Usuario eliminado exitosamente
+ *       404:
+ *         description: Usuario no encontrado
+ *       500:
+ *         description: Error eliminando el usuario
+ */
+router.delete('/firebase/:uid', deleteFirebaseUser);
 
 export default router;

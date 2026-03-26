@@ -298,7 +298,7 @@ export const updatePaciente = async (req: Request, res: Response) => {
 export const deletePaciente = async (req: Request, res: Response) => {
     try {
          const { id } = req.params;
-         // Logical delete is done in the "usuario" table
+         // 1. Desactivación lógica en Postgres
          const result = await pool.query(
             'UPDATE usuario SET is_active = false WHERE usuario_id = $1 RETURNING *',
             [id]
@@ -307,7 +307,29 @@ export const deletePaciente = async (req: Request, res: Response) => {
          if (result.rows.length === 0) {
               return res.status(404).json({ message: 'Paciente no encontrado' });
          }
-         res.status(200).json({ message: 'Paciente desactivado lógicamente', usuario: result.rows[0] });
+
+         // 2. Eliminación física en Firebase Auth mediante llamada al auth-service
+         try {
+             // Utiliza fetch nativo (disponible en Node 18+)
+             const authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://auth-service:3000';
+             const response = await fetch(`${authServiceUrl}/firebase/${id}`, {
+                 method: 'DELETE',
+                 headers: {
+                     'Content-Type': 'application/json',
+                     'Authorization': req.headers.authorization || ''
+                 }
+             });
+             
+             if (!response.ok) {
+                 console.warn(`[Warnings] Firebase user deletion response: ${response.status} ${response.statusText}`);
+             } else {
+                 console.log(`Firebase user ${id} deleted successfully.`);
+             }
+         } catch (firebaseErr: any) {
+             console.error('Error contacting auth-service to delete Firebase user:', firebaseErr.message);
+         }
+
+         res.status(200).json({ message: 'Paciente desactivado localmente y eliminado de Firebase', usuario: result.rows[0] });
      } catch (error) {
          res.status(500).json({ error: 'Error borrando al paciente' });
      }

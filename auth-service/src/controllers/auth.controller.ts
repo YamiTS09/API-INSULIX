@@ -118,3 +118,21 @@ export const checkUserExists = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error checking user existence', error: error.message });
     }
 };
+
+export const deleteFirebaseUser = async (req: Request, res: Response) => {
+    try {
+        const { uid } = req.params;
+        if (!uid) {
+            return res.status(400).json({ message: 'UID es requerido' });
+        }
+        
+        await admin.auth().deleteUser(uid);
+        return res.status(200).json({ message: 'Usuario eliminado de Firebase' });
+    } catch (error: any) {
+        if (error.code === 'auth/user-not-found') {
+            return res.status(404).json({ message: 'Usuario no encontrado en Firebase' });
+        }
+        console.error('Error deleting user from Firebase:', error);
+        res.status(500).json({ message: 'Error eliminando usuario en Firebase', error: error.message });
+    }
+};
