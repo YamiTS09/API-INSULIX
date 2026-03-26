@@ -114,8 +114,20 @@ const initializeDb = async () => {
             );
 
             CREATE INDEX IF NOT EXISTS idx_codigos_usuario ON codigos_verificacion(usuario_id);
+
+            CREATE TABLE IF NOT EXISTS codigos_registro (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(100) NOT NULL,
+                codigo VARCHAR(6) NOT NULL,
+                expira_en TIMESTAMP NOT NULL,
+                intentos INT DEFAULT 0,
+                usado BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_codigos_registro_email ON codigos_registro(email);
         `);
-        console.log("Database schema updated with new unified model (Roles, Usuario, Detalle_Medico, Detalle_Paciente)");
+        console.log("Database schema updated with new unified model (Roles, Usuario, Detalle_Medico, Detalle_Paciente, 2FA)");
     } catch (err) {
         console.error("Error initializing DB:", err);
     }
