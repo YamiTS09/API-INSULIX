@@ -152,6 +152,7 @@ export const createPaciente = async (req: Request, res: Response) => {
             glucosa_base, peso, estatura, telefono, direccion
         } = req.body;
         
+        console.log("DEBUG: Iniciando createPaciente para:", email, "con UID:", uid);
         let foto_url = req.body.foto_url;
         if (req.file && req.file.path) {
             foto_url = req.file.path;
