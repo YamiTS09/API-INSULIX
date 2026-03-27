@@ -148,7 +148,7 @@ export const createPaciente = async (req: Request, res: Response) => {
         const { 
             uid, email, medico_id, 
             nombre, apellido_paterno, apellido_materno, 
-            edad, fecha_nacimiento, sexo, tipo_diabetes, 
+            fecha_nacimiento, sexo, tipo_diabetes, 
             glucosa_base, peso, estatura, telefono, direccion
         } = req.body;
         
@@ -178,9 +178,9 @@ export const createPaciente = async (req: Request, res: Response) => {
         // 3. Insertar detalle paciente
         const pacienteRes = await client.query(
             `INSERT INTO detalle_paciente 
-            (paciente_id, medico_id, edad, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
-            [usuario_id, medico_id, edad, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url]
+            (paciente_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+            [usuario_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url]
         );
         
         await client.query('COMMIT');
@@ -242,7 +242,7 @@ export const updatePaciente = async (req: Request, res: Response) => {
          const { id } = req.params;
          const { 
              nombre, apellido_paterno, apellido_materno, 
-             edad, fecha_nacimiento, sexo, tipo_diabetes, 
+             fecha_nacimiento, sexo, tipo_diabetes, 
              glucosa_base, peso, estatura, telefono, direccion 
          } = req.body;
 
@@ -266,18 +266,17 @@ export const updatePaciente = async (req: Request, res: Response) => {
          // 2. Actualizar resto en detalle_paciente
          const result = await client.query(
             `UPDATE detalle_paciente SET 
-                edad = COALESCE($1, edad), 
-                fecha_nacimiento = COALESCE($2, fecha_nacimiento), 
-                sexo = COALESCE($3, sexo), 
-                tipo_diabetes = COALESCE($4, tipo_diabetes), 
-                glucosa_base = COALESCE($5, glucosa_base),
-                peso = COALESCE($6, peso),
-                estatura = COALESCE($7, estatura),
-                telefono = COALESCE($8, telefono),
-                direccion = COALESCE($9, direccion),
-                foto_url = COALESCE($10, foto_url)
-             WHERE paciente_id = $11 RETURNING *`,
-            [edad, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url, id]
+                fecha_nacimiento = COALESCE($1, fecha_nacimiento), 
+                sexo = COALESCE($2, sexo), 
+                tipo_diabetes = COALESCE($3, tipo_diabetes), 
+                glucosa_base = COALESCE($4, glucosa_base),
+                peso = COALESCE($5, peso),
+                estatura = COALESCE($6, estatura),
+                telefono = COALESCE($7, telefono),
+                direccion = COALESCE($8, direccion),
+                foto_url = COALESCE($9, foto_url)
+             WHERE paciente_id = $10 RETURNING *`,
+            [fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url, id]
          );
          
          if (result.rows.length === 0) {

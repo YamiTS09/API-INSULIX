@@ -67,7 +67,6 @@ CREATE TABLE detalle_medico (
 CREATE TABLE detalle_paciente (
     paciente_id VARCHAR(50) PRIMARY KEY REFERENCES usuario(usuario_id) ON DELETE CASCADE,
     medico_id VARCHAR(50) NOT NULL REFERENCES detalle_medico(medico_id), -- Médico asignado
-    edad INT NOT NULL,
     fecha_nacimiento DATE NOT NULL,
     sexo sexo_tipo NOT NULL,
     tipo_diabetes diabetes_tipo NOT NULL,

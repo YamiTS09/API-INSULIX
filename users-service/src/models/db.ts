@@ -76,7 +76,6 @@ const initializeDb = async () => {
             CREATE TABLE IF NOT EXISTS detalle_paciente (
                 paciente_id VARCHAR(50) PRIMARY KEY REFERENCES usuario(usuario_id) ON DELETE CASCADE,
                 medico_id VARCHAR(50) NOT NULL REFERENCES detalle_medico(medico_id),
-                edad INT NOT NULL,
                 fecha_nacimiento DATE NOT NULL,
                 sexo sexo_tipo NOT NULL,
                 tipo_diabetes diabetes_tipo NOT NULL,
@@ -139,6 +138,9 @@ const initializeDb = async () => {
         // Migración segura para tablas ya existentes
         await pool.query(`
             ALTER TABLE usuario ADD COLUMN IF NOT EXISTS is_2fa_enabled BOOLEAN DEFAULT FALSE;
+            
+            -- Eliminar columna edad calculada estática (se calcula dinámicamente)
+            ALTER TABLE detalle_paciente DROP COLUMN IF EXISTS edad;
         `);
 
         console.log("Database schema updated with new unified model (Roles, Usuario, Configuracion, etc.)");
