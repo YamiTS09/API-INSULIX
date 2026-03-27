@@ -138,3 +138,17 @@ export const deleteAsignacionDieta = async (req: AuthRequest, res: Response) => 
         res.status(500).json({ error: 'Error eliminando asignación' });
     }
 };
+
+// Nueva función para eliminación en cascada (llamada por users-service)
+export const deleteAsignacionesByPaciente = async (req: AuthRequest, res: Response) => {
+    try {
+        const { pacienteId } = req.params;
+        const medico_id = req.user?.uid;
+        if (!medico_id) return res.status(401).json({ error: 'No autorizado' });
+
+        const result = await AsignacionDieta.deleteMany({ paciente_id: pacienteId, medico_id });
+        res.status(200).json({ message: `Se eliminaron ${result.deletedCount} asignaciones de dieta`, deletedCount: result.deletedCount });
+    } catch (error) {
+        res.status(500).json({ error: 'Error eliminando asignaciones por paciente', details: error });
+    }
+};

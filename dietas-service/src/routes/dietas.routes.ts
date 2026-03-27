@@ -8,7 +8,8 @@ import {
     createAsignacionDieta,
     getAsignacionesDieta,
     updateAsignacionDieta,
-    deleteAsignacionDieta
+    deleteAsignacionDieta,
+    deleteAsignacionesByPaciente
 } from '../controllers/dietas.controller';
 
 const router = Router();
@@ -195,5 +196,6 @@ router.get('/asignaciones', authenticateToken, getAsignacionesDieta);
  */
 router.put('/asignaciones/:id', authenticateToken, updateAsignacionDieta);
 router.delete('/asignaciones/:id', authenticateToken, deleteAsignacionDieta);
+router.delete('/asignaciones/paciente/:pacienteId', authenticateToken, deleteAsignacionesByPaciente);
 
 export default router;

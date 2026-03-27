@@ -8,7 +8,8 @@ import {
     createAsignacionActividad,
     getAsignacionesActividad,
     updateAsignacionActividad,
-    deleteAsignacionActividad
+    deleteAsignacionActividad,
+    deleteAsignacionesByPaciente
 } from '../controllers/actividad.controller';
 
 const router = Router();
@@ -193,5 +194,6 @@ router.get('/asignaciones', authenticateToken, getAsignacionesActividad);
  */
 router.put('/asignaciones/:id', authenticateToken, updateAsignacionActividad);
 router.delete('/asignaciones/:id', authenticateToken, deleteAsignacionActividad);
+router.delete('/asignaciones/paciente/:pacienteId', authenticateToken, deleteAsignacionesByPaciente);
 
 export default router;

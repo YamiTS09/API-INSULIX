@@ -308,28 +308,57 @@ export const deletePaciente = async (req: Request, res: Response) => {
               return res.status(404).json({ message: 'Paciente no encontrado' });
          }
 
-         // 2. Eliminación física en Firebase Auth mediante llamada al auth-service
-         try {
-             // Utiliza fetch nativo (disponible en Node 18+)
-             const authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://auth-service:3000';
-             const response = await fetch(`${authServiceUrl}/firebase/${id}`, {
-                 method: 'DELETE',
-                 headers: {
-                     'Content-Type': 'application/json',
-                     'Authorization': req.headers.authorization || ''
-                 }
-             });
-             
-             if (!response.ok) {
-                 console.warn(`[Warnings] Firebase user deletion response: ${response.status} ${response.statusText}`);
-             } else {
-                 console.log(`Firebase user ${id} deleted successfully.`);
-             }
-         } catch (firebaseErr: any) {
-             console.error('Error contacting auth-service to delete Firebase user:', firebaseErr.message);
-         }
+          // 2. Eliminación física en Firebase Auth mediante llamada al auth-service
+          try {
+              const authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://auth-service:3000';
+              const response = await fetch(`${authServiceUrl}/firebase/${id}`, {
+                  method: 'DELETE',
+                  headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': req.headers.authorization || ''
+                  }
+              });
+              
+              if (!response.ok) {
+                  console.warn(`[Warnings] Firebase user deletion response: ${response.status} ${response.statusText}`);
+              } else {
+                  console.log(`Firebase user ${id} deleted successfully.`);
+              }
+          } catch (firebaseErr: any) {
+              console.error('Error contacting auth-service to delete Firebase user:', firebaseErr.message);
+          }
 
-         res.status(200).json({ message: 'Paciente eliminado físicamente de la base de datos y de Firebase', usuario: result.rows[0] });
+          // 3. Eliminación en cascada en microservicios de Dietas y Actividades
+          const dietasServiceUrl = process.env.DIETAS_SERVICE_URL || 'http://dietas-service:3002';
+          const actividadServiceUrl = process.env.ACTIVIDADES_SERVICE_URL || 'http://actividad-service:3003';
+
+          const cleanupServices = [
+              { name: 'Dietas', url: `${dietasServiceUrl}/dietas/asignaciones/paciente/${id}` },
+              { name: 'Actividades', url: `${actividadServiceUrl}/actividad/asignaciones/paciente/${id}` }
+          ];
+
+          for (const service of cleanupServices) {
+              try {
+                  const resCleanup = await fetch(service.url, {
+                      method: 'DELETE',
+                      headers: {
+                          'Authorization': req.headers.authorization || ''
+                      }
+                  });
+                  if (!resCleanup.ok) {
+                      console.warn(`[Cascading Delete] Failed to cleanup ${service.name}: ${resCleanup.status}`);
+                  } else {
+                      console.log(`[Cascading Delete] Cleanup successful for ${service.name}`);
+                  }
+              } catch (err: any) {
+                  console.error(`[Cascading Delete] Error contacting ${service.name} service:`, err.message);
+              }
+          }
+
+          res.status(200).json({ 
+              message: 'Paciente eliminado físicamente de la base de datos, Firebase y microservicios relacionados', 
+              usuario: result.rows[0] 
+          });
      } catch (error) {
          res.status(500).json({ error: 'Error borrando al paciente' });
      }
