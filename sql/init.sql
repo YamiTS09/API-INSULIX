@@ -35,6 +35,7 @@ CREATE TABLE usuario (
     intentos_fallidos INT DEFAULT 0,
     bloqueado_hasta TIMESTAMP,
     is_active BOOLEAN DEFAULT TRUE,
+    is_2fa_enabled BOOLEAN DEFAULT FALSE,
     fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- ISO 8601
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -78,6 +79,15 @@ CREATE TABLE detalle_paciente (
     foto_url VARCHAR(500)
 );
 
+-- =============================================
+-- MÓDULO B.5: CONFIGURACIONES DE USUARIO
+-- =============================================
+CREATE TABLE configuracion_usuario (
+    usuario_id VARCHAR(50) PRIMARY KEY REFERENCES usuario(usuario_id) ON DELETE CASCADE,
+    tema_oscuro BOOLEAN DEFAULT FALSE,
+    idioma VARCHAR(10) DEFAULT 'es',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- =============================================
 -- MÓDULO C: TELEMETRÍA Y SENSOR (INTEROPERABILIDAD)

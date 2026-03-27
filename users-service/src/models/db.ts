@@ -51,6 +51,7 @@ const initializeDb = async () => {
                 intentos_fallidos INT DEFAULT 0,
                 bloqueado_hasta TIMESTAMP,
                 is_active BOOLEAN DEFAULT TRUE,
+                is_2fa_enabled BOOLEAN DEFAULT FALSE,
                 fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -85,6 +86,13 @@ const initializeDb = async () => {
                 telefono VARCHAR(15) UNIQUE NOT NULL,
                 direccion VARCHAR(255),
                 foto_url VARCHAR(500)
+            );
+
+            CREATE TABLE IF NOT EXISTS configuracion_usuario (
+                usuario_id VARCHAR(50) PRIMARY KEY REFERENCES usuario(usuario_id) ON DELETE CASCADE,
+                tema_oscuro BOOLEAN DEFAULT FALSE,
+                idioma VARCHAR(10) DEFAULT 'es',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             -- Triggers para updated_at
@@ -127,7 +135,13 @@ const initializeDb = async () => {
 
             CREATE INDEX IF NOT EXISTS idx_codigos_registro_email ON codigos_registro(email);
         `);
-        console.log("Database schema updated with new unified model (Roles, Usuario, Detalle_Medico, Detalle_Paciente, 2FA)");
+
+        // Migración segura para tablas ya existentes
+        await pool.query(`
+            ALTER TABLE usuario ADD COLUMN IF NOT EXISTS is_2fa_enabled BOOLEAN DEFAULT FALSE;
+        `);
+
+        console.log("Database schema updated with new unified model (Roles, Usuario, Configuracion, etc.)");
     } catch (err) {
         console.error("Error initializing DB:", err);
     }

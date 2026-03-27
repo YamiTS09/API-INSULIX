@@ -44,9 +44,11 @@ export const verifyToken = async (req: Request, res: Response) => {
 
         // 2. Buscar en Postgres el ROL del usuario (y su estado activo) y sus nombres
         const userRes = await pool.query(`
-            SELECT u.is_active, r.nombre_rol, u.nombre, u.apellido_paterno, u.apellido_materno
+            SELECT u.is_active, r.nombre_rol, u.nombre, u.apellido_paterno, u.apellido_materno,
+                   u.is_2fa_enabled, c.tema_oscuro, c.idioma
             FROM usuario u 
             JOIN roles r ON u.rol_id = r.rol_id 
+            LEFT JOIN configuracion_usuario c ON u.usuario_id = c.usuario_id
             WHERE u.usuario_id = $1
         `, [uid]);
 
@@ -64,11 +66,14 @@ export const verifyToken = async (req: Request, res: Response) => {
         const nombre = userRecord.nombre;
         const apellido_paterno = userRecord.apellido_paterno || '';
         const apellido_materno = userRecord.apellido_materno || '';
+        const is_2fa_enabled = userRecord.is_2fa_enabled || false;
+        const tema_oscuro = userRecord.tema_oscuro || false;
+        const idioma = userRecord.idioma || 'es';
 
         // 3. Emitir el Custom JWT de la aplicación
         const jwtSecret = process.env.JWT_SECRET || 'fallback_secret';
         const customToken = jwt.sign(
-            { uid, email, role, nombre, apellido_paterno, apellido_materno },
+            { uid, email, role, nombre, apellido_paterno, apellido_materno, is_2fa_enabled, tema_oscuro, idioma },
             jwtSecret,
             { expiresIn: '2h' } // El token expira en 2 horas
         );
@@ -77,7 +82,7 @@ export const verifyToken = async (req: Request, res: Response) => {
         res.status(200).json({
             valid: true,
             access_token: customToken,
-            user: { uid, email, role, nombre, apellido_paterno, apellido_materno }
+            user: { uid, email, role, nombre, apellido_paterno, apellido_materno, is_2fa_enabled, tema_oscuro, idioma }
         });
     } catch (error) {
         console.error('Error verificando token:', error);
