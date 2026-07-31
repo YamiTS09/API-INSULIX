@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { pool } from '../models/db';
+import { AuthRequest } from '../middlewares/jwt.middleware';
 
 export const registerMedico = async (req: Request, res: Response) => {
     const client = await pool.connect();
@@ -142,15 +143,33 @@ export const updateMedico = async (req: Request, res: Response) => {
     }
 };
 
-export const createPaciente = async (req: Request, res: Response) => {
+export const createPaciente = async (req: AuthRequest, res: Response) => {
     const client = await pool.connect();
     try {
         const { 
             uid, email, medico_id, 
             nombre, apellido_paterno, apellido_materno, 
             fecha_nacimiento, sexo, tipo_diabetes, 
-            glucosa_base, peso, estatura, telefono, direccion
+            glucosa_base, peso, peso_fecha_medicion, estatura, telefono, direccion
         } = req.body;
+
+        if (req.user?.uid !== medico_id) {
+            return res.status(403).json({ message: 'No puedes registrar pacientes para otro médico' });
+        }
+
+        const tienePesoInicial = peso !== undefined && peso !== null && peso !== '';
+        const pesoInicial = tienePesoInicial ? Number(peso) : null;
+        if (tienePesoInicial && (!Number.isFinite(pesoInicial) || pesoInicial! < 30 || pesoInicial! > 200)) {
+            return res.status(400).json({ message: 'El peso debe estar entre 30 y 200 kg' });
+        }
+
+        const fechaPesoInicial = peso_fecha_medicion ? new Date(peso_fecha_medicion) : new Date();
+        if (tienePesoInicial && (
+            Number.isNaN(fechaPesoInicial.getTime()) ||
+            fechaPesoInicial.getTime() > Date.now() + (5 * 60 * 1000)
+        )) {
+            return res.status(400).json({ message: 'La fecha de medición del peso no es válida' });
+        }
         
         console.log("DEBUG: Iniciando createPaciente para:", email, "con UID:", uid);
         let foto_url = req.body.foto_url;
@@ -179,13 +198,30 @@ export const createPaciente = async (req: Request, res: Response) => {
         // 3. Insertar detalle paciente
         const pacienteRes = await client.query(
             `INSERT INTO detalle_paciente 
-            (paciente_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-            [usuario_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url]
+            (paciente_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, estatura, telefono, direccion, foto_url) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+            [usuario_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, estatura, telefono, direccion, foto_url]
         );
+
+        let pesoInicialRegistrado = null;
+        if (tienePesoInicial) {
+            const pesoRes = await client.query(
+                `INSERT INTO historial_peso
+                (paciente_id, valor_kg, fecha_medicion, registrado_por, origen)
+                VALUES ($1, $2, $3, $4, 'MEDICO')
+                RETURNING *`,
+                [usuario_id, pesoInicial, fechaPesoInicial.toISOString(), req.user.uid]
+            );
+            pesoInicialRegistrado = pesoRes.rows[0];
+        }
         
         await client.query('COMMIT');
-        res.status(201).json({ usuario_id, email, detalle: pacienteRes.rows[0] });
+        res.status(201).json({
+            usuario_id,
+            email,
+            detalle: pacienteRes.rows[0],
+            peso_inicial: pesoInicialRegistrado
+        });
     } catch (error: any) {
         await client.query('ROLLBACK');
         res.status(500).json({ error: 'Error agregando paciente', details: error.message || error });
@@ -244,7 +280,7 @@ export const updatePaciente = async (req: Request, res: Response) => {
          const { 
              nombre, apellido_paterno, apellido_materno, 
              fecha_nacimiento, sexo, tipo_diabetes, 
-             glucosa_base, peso, estatura, telefono, direccion 
+             glucosa_base, estatura, telefono, direccion 
          } = req.body;
 
          let foto_url = req.body.foto_url;
@@ -271,14 +307,13 @@ export const updatePaciente = async (req: Request, res: Response) => {
                 sexo = COALESCE($2, sexo), 
                 tipo_diabetes = COALESCE($3, tipo_diabetes), 
                 glucosa_base = COALESCE($4, glucosa_base),
-                peso = COALESCE($5, peso),
-                estatura = COALESCE($6, estatura),
-                telefono = COALESCE($7, telefono),
-                direccion = COALESCE($8, direccion),
-                foto_url = COALESCE($9, foto_url)
-             WHERE paciente_id = $10 RETURNING *`,
-            [fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, peso, estatura, telefono, direccion, foto_url, id]
-         );
+                estatura = COALESCE($5, estatura),
+                telefono = COALESCE($6, telefono),
+                direccion = COALESCE($7, direccion),
+                foto_url = COALESCE($8, foto_url)
+             WHERE paciente_id = $9 RETURNING *`,
+            [fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, estatura, telefono, direccion, foto_url, id]
+        );
          
          if (result.rows.length === 0) {
               await client.query('ROLLBACK');

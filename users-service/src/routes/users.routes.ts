@@ -14,6 +14,11 @@ import {
 import { generateCode, verifyCode, generateRegistrationCode, verifyRegistrationCode } from '../controllers/2fa.controller';
 import { checkLockoutStatus, logFailedAttempt, resetAttempts } from '../controllers/lockout.controller';
 import { authenticateJWT, requireRole } from '../middlewares/jwt.middleware';
+import {
+    registrarPeso,
+    obtenerPesoActual,
+    obtenerHistorialPeso
+} from '../controllers/weight.controller';
 
 const router = Router();
 
@@ -132,6 +137,11 @@ router.put('/medico/:id', authenticateJWT, upload.single('foto'), updateMedico);
  *                 type: number
  *               peso:
  *                 type: number
+ *                 description: Medición inicial opcional, registrada en el historial de peso
+ *               peso_fecha_medicion:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Fecha opcional de la medición inicial
  *               estatura:
  *                 type: number
  *               telefono:
@@ -216,8 +226,6 @@ router.get('/paciente', authenticateJWT, getPacientes);
  *                 enum: [Tipo 1, Tipo 2, Gestacional, Otro]
  *               glucosa_base:
  *                 type: number
- *               peso:
- *                 type: number
  *               estatura:
  *                 type: number
  *               telefono:
@@ -251,6 +259,69 @@ router.get('/paciente', authenticateJWT, getPacientes);
 router.get('/paciente/:id', authenticateJWT, getPacienteById);
 router.put('/paciente/:id', authenticateJWT, requireRole(['MEDICO']), upload.single('foto'), updatePaciente);
 router.delete('/paciente/:id', authenticateJWT, requireRole(['MEDICO']), deletePaciente);
+
+/**
+ * @swagger
+ * /users/paciente/{id}/peso:
+ *   post:
+ *     summary: Registrar una medición de peso
+ *     tags: [Peso]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [valor_kg]
+ *             properties:
+ *               valor_kg:
+ *                 type: number
+ *                 minimum: 30
+ *                 maximum: 200
+ *               fecha_medicion:
+ *                 type: string
+ *                 format: date-time
+ *     responses:
+ *       201:
+ *         description: Medición registrada
+ *       403:
+ *         description: Sin acceso al paciente
+ */
+router.post('/paciente/:id/peso', authenticateJWT, requireRole(['MEDICO', 'PACIENTE']), registrarPeso);
+
+/**
+ * @swagger
+ * /users/paciente/{id}/peso/actual:
+ *   get:
+ *     summary: Obtener el peso actual del paciente
+ *     tags: [Peso]
+ */
+router.get(
+    '/paciente/:id/peso/actual',
+    authenticateJWT,
+    requireRole(['MEDICO', 'PACIENTE', 'ADMIN']),
+    obtenerPesoActual
+);
+
+/**
+ * @swagger
+ * /users/paciente/{id}/peso/historial:
+ *   get:
+ *     summary: Obtener el historial de peso del paciente
+ *     tags: [Peso]
+ */
+router.get(
+    '/paciente/:id/peso/historial',
+    authenticateJWT,
+    requireRole(['MEDICO', 'PACIENTE', 'ADMIN']),
+    obtenerHistorialPeso
+);
 
 /**
  * @swagger

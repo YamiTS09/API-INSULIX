@@ -10,6 +10,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TYPE sexo_tipo AS ENUM ('M', 'F', 'Otro');
 CREATE TYPE diabetes_tipo AS ENUM ('Tipo 1', 'Tipo 2', 'Gestacional', 'Otro');
 CREATE TYPE categoria_alimento AS ENUM ('Desayuno', 'Comida', 'Cena', 'Colación');
+CREATE TYPE peso_origen AS ENUM ('MEDICO', 'PACIENTE');
 
 -- =============================================
 -- MÓDULO A: SEGURIDAD Y ACCESO (RBAC UNIFICADO)
@@ -71,11 +72,22 @@ CREATE TABLE detalle_paciente (
     sexo sexo_tipo NOT NULL,
     tipo_diabetes diabetes_tipo NOT NULL,
     glucosa_base DECIMAL(5,2), -- Meta o base de glucosa mg/dL
-    peso DECIMAL(5,2),         -- en kg
     estatura DECIMAL(4,2),     -- en metros
     telefono VARCHAR(15) UNIQUE NOT NULL,
     direccion VARCHAR(255),
     foto_url VARCHAR(500)
+);
+
+-- B.4 Historial de peso del paciente
+-- Cada medición se conserva; el peso actual se obtiene por la fecha_medicion más reciente.
+CREATE TABLE historial_peso (
+    peso_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    paciente_id VARCHAR(50) NOT NULL REFERENCES detalle_paciente(paciente_id) ON DELETE CASCADE,
+    valor_kg DECIMAL(5,2) NOT NULL CHECK (valor_kg BETWEEN 30 AND 200),
+    fecha_medicion TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fecha_registro TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    registrado_por VARCHAR(50) REFERENCES usuario(usuario_id) ON DELETE SET NULL,
+    origen peso_origen NOT NULL
 );
 
 -- =============================================
@@ -159,6 +171,8 @@ CREATE TABLE tratamiento_farmacologico (
 -- =============================================
 CREATE INDEX idx_usuario_email ON usuario(email);
 CREATE INDEX idx_paciente_medico ON detalle_paciente(medico_id);
+CREATE INDEX idx_historial_peso_paciente_fecha
+    ON historial_peso(paciente_id, fecha_medicion DESC);
 CREATE INDEX idx_sensor_paciente ON dispositivo_sensor(paciente_id);
 CREATE INDEX idx_historial_sensor ON historial_glucosa(sensor_id);
 CREATE INDEX idx_historial_fecha ON historial_glucosa(fecha_hora);
