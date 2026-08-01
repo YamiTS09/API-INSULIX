@@ -107,9 +107,14 @@ services:
       - "3004:3004"
     environment:
       - PORT=3004
-      - MONGO_URI=mongodb://admin:secretpassword@mongo_db:27017/insulix_reportes?authSource=admin
+      - DB_USER=admin
+      - DB_PASSWORD=secretpassword
+      - DB_HOST=postgres_db
+      - DB_NAME=insulix_db
+      - DB_PORT=5432
+      - JWT_SECRET=super_secret_insulix_jwt_key_2026
     depends_on:
-      - mongo_db
+      - postgres_db
     networks:
       - insulix_network
     restart: unless-stopped

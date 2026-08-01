@@ -1,85 +1,367 @@
-import { Request, Response } from 'express';
-import { HistorialGlucosa } from '../models/HistorialGlucosa';
+import { Response } from 'express';
+import { pool } from '../models/db';
+import { AuthRequest, AuthUser } from '../middlewares/jwt.middleware';
 
-// Agregar lectura de glucosa
-export const agregarLectura = async (req: Request, res: Response) => {
-    try {
-        const nuevaLectura = new HistorialGlucosa(req.body);
-        const saved = await nuevaLectura.save();
-        res.status(201).json(saved);
-    } catch (error) {
-        res.status(500).json({ error: 'Error agregando lectura de glucosa', details: error });
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MIN_GLUCOSE = 20;
+const MAX_GLUCOSE = 600;
+
+const canAccessPatient = async (patientId: string, user?: AuthUser): Promise<boolean> => {
+    if (!user?.uid || !user.role) return false;
+
+    if (user.role === 'ADMIN') {
+        const result = await pool.query(
+            `SELECT 1
+             FROM detalle_paciente p
+             JOIN usuario u ON u.usuario_id = p.paciente_id
+             WHERE p.paciente_id = $1 AND u.is_active = TRUE`,
+            [patientId]
+        );
+        return result.rowCount === 1;
     }
+
+    if (user.role === 'PACIENTE' && user.uid === patientId) {
+        const result = await pool.query(
+            `SELECT 1
+             FROM detalle_paciente p
+             JOIN usuario u ON u.usuario_id = p.paciente_id
+             WHERE p.paciente_id = $1 AND u.is_active = TRUE`,
+            [patientId]
+        );
+        return result.rowCount === 1;
+    }
+
+    if (user.role === 'MEDICO') {
+        const result = await pool.query(
+            `SELECT 1
+             FROM detalle_paciente p
+             JOIN usuario u ON u.usuario_id = p.paciente_id
+             WHERE p.paciente_id = $1
+               AND p.medico_id = $2
+               AND u.is_active = TRUE`,
+            [patientId, user.uid]
+        );
+        return result.rowCount === 1;
+    }
+
+    return false;
 };
 
-// Obtener historial con filtros de fecha
-export const getHistorialPaciente = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params; // paciente_id
-        const { startDate, endDate } = req.query;
-        
-        // Tipamos la consulta para evitar el 'any'
-        const query: Record<string, any> = { paciente_id: Number(id) };
+const parseDate = (value: unknown, endOfDay = false): Date | null => {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? `${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`
+        : value;
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
 
-        if (startDate && endDate) {
-            query.fecha_hora = { 
-                $gte: new Date(startDate as string), 
-                $lte: new Date(endDate as string) 
-            };
+const serializeReading = (row: any) => ({
+    ...row,
+    _id: row.lectura_id,
+    valor_mgdl: Number(row.valor_mgdl)
+});
+
+const getSensor = async (sensorId: string) => {
+    if (!UUID_PATTERN.test(sensorId)) return null;
+    const result = await pool.query(
+        `SELECT sensor_id, paciente_id, numero_serie, modelo, fecha_activacion,
+                fecha_desactivacion, activo, es_simulado
+         FROM dispositivo_sensor
+         WHERE sensor_id = $1`,
+        [sensorId]
+    );
+    return result.rows[0] ?? null;
+};
+
+export const registrarSensor = async (req: AuthRequest, res: Response) => {
+    try {
+        const patientId = String(req.body.paciente_id ?? '').trim();
+        const serialNumber = String(req.body.numero_serie ?? '').trim();
+        const model = req.body.modelo ? String(req.body.modelo).trim() : null;
+        const activationDate = req.body.fecha_activacion
+            ? parseDate(req.body.fecha_activacion)
+            : new Date();
+
+        if (!patientId) {
+            return res.status(400).json({ message: 'paciente_id es obligatorio' });
+        }
+        if (!serialNumber || serialNumber.length > 50) {
+            return res.status(400).json({ message: 'numero_serie es obligatorio y admite hasta 50 caracteres' });
+        }
+        if (model && model.length > 100) {
+            return res.status(400).json({ message: 'modelo admite hasta 100 caracteres' });
+        }
+        if (!activationDate) {
+            return res.status(400).json({ message: 'fecha_activacion no es valida' });
+        }
+        if (!await canAccessPatient(patientId, req.user)) {
+            return res.status(403).json({ message: 'No tienes acceso a este paciente' });
         }
 
-        const lecturas = await HistorialGlucosa.find(query).sort({ fecha_hora: -1 });
-        res.status(200).json(lecturas);
-    } catch (error) {
-        res.status(500).json({ error: 'Error obteniendo historial' });
+        const result = await pool.query(
+            `INSERT INTO dispositivo_sensor
+                (paciente_id, numero_serie, modelo, fecha_activacion, es_simulado)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING *`,
+            [patientId, serialNumber, model, activationDate.toISOString(), Boolean(req.body.es_simulado)]
+        );
+        return res.status(201).json(result.rows[0]);
+    } catch (error: any) {
+        if (error.code === '23505') {
+            return res.status(409).json({ message: 'Ya existe un sensor con ese numero de serie' });
+        }
+        return res.status(500).json({ error: 'Error registrando el sensor', details: error.message });
     }
 };
 
-// Actualizar una lectura específica (ObjectId)
-export const updateLectura = async (req: Request, res: Response) => {
+export const listarSensores = async (req: AuthRequest, res: Response) => {
     try {
-        const { id } = req.params;
-        const actualizada = await HistorialGlucosa.findByIdAndUpdate(id, req.body, { new: true });
-        
-        if (!actualizada) return res.status(404).json({ message: 'Lectura no encontrada' });
-        res.status(200).json(actualizada);
-    } catch (error) {
-        res.status(500).json({ error: 'Error actualizando lectura', details: error });
+        const patientId = String(req.params.pacienteId);
+        if (!await canAccessPatient(patientId, req.user)) {
+            return res.status(403).json({ message: 'No tienes acceso a este paciente' });
+        }
+
+        const result = await pool.query(
+            `SELECT *
+             FROM dispositivo_sensor
+             WHERE paciente_id = $1
+             ORDER BY activo DESC, fecha_activacion DESC`,
+            [patientId]
+        );
+        return res.status(200).json({ sensores: result.rows });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Error obteniendo los sensores', details: error.message });
     }
 };
 
-// Generar estadísticas (Reporte Agregado)
-export const getGraficas = async (req: Request, res: Response) => {
+export const agregarLectura = async (req: AuthRequest, res: Response) => {
     try {
-         const { paciente_id } = req.query;
-         
-         if (!paciente_id) {
-             return res.status(400).json({ message: 'Se requiere paciente_id para generar reporte' });
-         }
+        const glucose = Number(req.body.valor_mgdl);
+        if (!Number.isFinite(glucose) || glucose < MIN_GLUCOSE || glucose > MAX_GLUCOSE) {
+            return res.status(400).json({
+                message: `valor_mgdl debe estar entre ${MIN_GLUCOSE} y ${MAX_GLUCOSE}`
+            });
+        }
 
-         // Agregación de MongoDB para estadísticas rápidas
-         const stats = await HistorialGlucosa.aggregate([
-             { $match: { paciente_id: Number(paciente_id) } },
-             {
-                 $group: {
-                     _id: "$paciente_id",
-                     promedio: { $avg: "$valor_mgdl" },
-                     maximo: { $max: "$valor_mgdl" },
-                     minimo: { $min: "$valor_mgdl" },
-                     total_lecturas: { $sum: 1 }
-                 }
-             }
-         ]);
+        const measuredAt = req.body.fecha_hora ? parseDate(req.body.fecha_hora) : new Date();
+        if (!measuredAt) {
+            return res.status(400).json({ message: 'fecha_hora no es valida' });
+        }
+        if (measuredAt.getTime() > Date.now() + 5 * 60 * 1000) {
+            return res.status(400).json({ message: 'fecha_hora no puede estar en el futuro' });
+        }
 
-         // Si no hay datos, devolvemos un objeto vacío estructurado en lugar de un error
-         res.status(200).json(stats[0] || { 
-            _id: paciente_id, 
-            promedio: 0, 
-            maximo: 0, 
-            minimo: 0, 
-            total_lecturas: 0 
-         });
-    } catch (error) {
-         res.status(500).json({ error: 'Error generando estadísticas' });
+        let sensor: any = null;
+        if (req.body.sensor_id) {
+            sensor = await getSensor(String(req.body.sensor_id));
+        } else if (req.body.paciente_id) {
+            const sensorResult = await pool.query(
+                `SELECT sensor_id, paciente_id, numero_serie, modelo, fecha_activacion,
+                        fecha_desactivacion, activo, es_simulado
+                 FROM dispositivo_sensor
+                 WHERE paciente_id = $1 AND activo = TRUE
+                 ORDER BY fecha_activacion DESC
+                 LIMIT 1`,
+                [String(req.body.paciente_id)]
+            );
+            sensor = sensorResult.rows[0] ?? null;
+        }
+
+        if (!sensor) {
+            return res.status(404).json({
+                message: 'No se encontro un sensor. Registra uno o envia un sensor_id valido'
+            });
+        }
+        if (!sensor.activo) {
+            return res.status(409).json({ message: 'El sensor esta desactivado' });
+        }
+        if (!await canAccessPatient(sensor.paciente_id, req.user)) {
+            return res.status(403).json({ message: 'No tienes acceso a este paciente' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO historial_glucosa (sensor_id, valor_mgdl, fecha_hora)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (sensor_id, fecha_hora) DO NOTHING
+             RETURNING *, $4::VARCHAR AS paciente_id`,
+            [sensor.sensor_id, glucose, measuredAt.toISOString(), sensor.paciente_id]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(409).json({ message: 'Ya existe una lectura del sensor para esa fecha y hora' });
+        }
+        return res.status(201).json(serializeReading(result.rows[0]));
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Error agregando la lectura de glucosa', details: error.message });
+    }
+};
+
+export const getHistorialPaciente = async (req: AuthRequest, res: Response) => {
+    try {
+        const patientId = String(req.params.id);
+        if (!await canAccessPatient(patientId, req.user)) {
+            return res.status(403).json({ message: 'No tienes acceso a este paciente' });
+        }
+
+        const startDate = req.query.startDate ? parseDate(req.query.startDate) : null;
+        const endDate = req.query.endDate ? parseDate(req.query.endDate, true) : null;
+        if ((req.query.startDate && !startDate) || (req.query.endDate && !endDate)) {
+            return res.status(400).json({ message: 'El rango de fechas no es valido' });
+        }
+        if (startDate && endDate && startDate > endDate) {
+            return res.status(400).json({ message: 'startDate no puede ser posterior a endDate' });
+        }
+
+        const parsedLimit = Number.parseInt(String(req.query.limit ?? '500'), 10);
+        const parsedOffset = Number.parseInt(String(req.query.offset ?? '0'), 10);
+        const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 5000) : 500;
+        const offset = Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0;
+
+        const result = await pool.query(
+            `SELECT hg.*, ds.paciente_id, ds.numero_serie, ds.modelo, ds.es_simulado
+             FROM historial_glucosa hg
+             JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
+             WHERE ds.paciente_id = $1
+               AND ($2::TIMESTAMPTZ IS NULL OR hg.fecha_hora >= $2)
+               AND ($3::TIMESTAMPTZ IS NULL OR hg.fecha_hora <= $3)
+             ORDER BY hg.fecha_hora DESC
+             LIMIT $4 OFFSET $5`,
+            [patientId, startDate?.toISOString() ?? null, endDate?.toISOString() ?? null, limit, offset]
+        );
+        return res.status(200).json(result.rows.map(serializeReading));
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Error obteniendo el historial', details: error.message });
+    }
+};
+
+export const getLecturaActual = async (req: AuthRequest, res: Response) => {
+    try {
+        const patientId = String(req.params.id);
+        if (!await canAccessPatient(patientId, req.user)) {
+            return res.status(403).json({ message: 'No tienes acceso a este paciente' });
+        }
+
+        const result = await pool.query(
+            `SELECT hg.*, ds.paciente_id, ds.numero_serie, ds.modelo, ds.es_simulado
+             FROM historial_glucosa hg
+             JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
+             WHERE ds.paciente_id = $1
+             ORDER BY hg.fecha_hora DESC, hg.fecha_registro DESC
+             LIMIT 1`,
+            [patientId]
+        );
+        return res.status(200).json({
+            medicion: result.rows[0] ? serializeReading(result.rows[0]) : null
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Error obteniendo la glucosa actual', details: error.message });
+    }
+};
+
+export const updateLectura = async (req: AuthRequest, res: Response) => {
+    try {
+        const readingId = String(req.params.id);
+        if (!UUID_PATTERN.test(readingId)) {
+            return res.status(400).json({ message: 'El identificador de la lectura no es valido' });
+        }
+
+        const currentResult = await pool.query(
+            `SELECT hg.lectura_id, ds.paciente_id
+             FROM historial_glucosa hg
+             JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
+             WHERE hg.lectura_id = $1`,
+            [readingId]
+        );
+        if (currentResult.rowCount === 0) {
+            return res.status(404).json({ message: 'Lectura no encontrada' });
+        }
+        if (!await canAccessPatient(currentResult.rows[0].paciente_id, req.user)) {
+            return res.status(403).json({ message: 'No tienes acceso a este paciente' });
+        }
+
+        const hasGlucose = req.body.valor_mgdl !== undefined;
+        const hasDate = req.body.fecha_hora !== undefined;
+        if (!hasGlucose && !hasDate) {
+            return res.status(400).json({ message: 'Envia valor_mgdl o fecha_hora para corregir la lectura' });
+        }
+
+        const glucose = hasGlucose ? Number(req.body.valor_mgdl) : null;
+        if (hasGlucose && (!Number.isFinite(glucose) || glucose! < MIN_GLUCOSE || glucose! > MAX_GLUCOSE)) {
+            return res.status(400).json({
+                message: `valor_mgdl debe estar entre ${MIN_GLUCOSE} y ${MAX_GLUCOSE}`
+            });
+        }
+        const measuredAt = hasDate ? parseDate(req.body.fecha_hora) : null;
+        if (hasDate && !measuredAt) {
+            return res.status(400).json({ message: 'fecha_hora no es valida' });
+        }
+        if (measuredAt && measuredAt.getTime() > Date.now() + 5 * 60 * 1000) {
+            return res.status(400).json({ message: 'fecha_hora no puede estar en el futuro' });
+        }
+
+        const updated = await pool.query(
+            `UPDATE historial_glucosa
+             SET valor_mgdl = CASE WHEN $2::BOOLEAN THEN $3 ELSE valor_mgdl END,
+                 fecha_hora = CASE WHEN $4::BOOLEAN THEN $5 ELSE fecha_hora END
+             WHERE lectura_id = $1
+             RETURNING *, $6::VARCHAR AS paciente_id`,
+            [
+                readingId,
+                hasGlucose,
+                glucose,
+                hasDate,
+                measuredAt?.toISOString() ?? null,
+                currentResult.rows[0].paciente_id
+            ]
+        );
+        return res.status(200).json(serializeReading(updated.rows[0]));
+    } catch (error: any) {
+        if (error.code === '23505') {
+            return res.status(409).json({ message: 'Ya existe una lectura del sensor para esa fecha y hora' });
+        }
+        return res.status(500).json({ error: 'Error actualizando la lectura', details: error.message });
+    }
+};
+
+export const getGraficas = async (req: AuthRequest, res: Response) => {
+    try {
+        const patientId = String(req.query.paciente_id ?? '').trim();
+        if (!patientId) {
+            return res.status(400).json({ message: 'Se requiere paciente_id para generar el reporte' });
+        }
+        if (!await canAccessPatient(patientId, req.user)) {
+            return res.status(403).json({ message: 'No tienes acceso a este paciente' });
+        }
+
+        const startDate = req.query.startDate ? parseDate(req.query.startDate) : null;
+        const endDate = req.query.endDate ? parseDate(req.query.endDate, true) : null;
+        if ((req.query.startDate && !startDate) || (req.query.endDate && !endDate)) {
+            return res.status(400).json({ message: 'El rango de fechas no es valido' });
+        }
+
+        const result = await pool.query(
+            `SELECT AVG(hg.valor_mgdl) AS promedio,
+                    MAX(hg.valor_mgdl) AS maximo,
+                    MIN(hg.valor_mgdl) AS minimo,
+                    COUNT(*)::INT AS total_lecturas
+             FROM historial_glucosa hg
+             JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
+             WHERE ds.paciente_id = $1
+               AND ($2::TIMESTAMPTZ IS NULL OR hg.fecha_hora >= $2)
+               AND ($3::TIMESTAMPTZ IS NULL OR hg.fecha_hora <= $3)`,
+            [patientId, startDate?.toISOString() ?? null, endDate?.toISOString() ?? null]
+        );
+
+        const row = result.rows[0];
+        return res.status(200).json({
+            _id: patientId,
+            promedio: row.promedio === null ? 0 : Number(row.promedio),
+            maximo: row.maximo === null ? 0 : Number(row.maximo),
+            minimo: row.minimo === null ? 0 : Number(row.minimo),
+            total_lecturas: Number(row.total_lecturas)
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: 'Error generando estadisticas', details: error.message });
     }
 };
