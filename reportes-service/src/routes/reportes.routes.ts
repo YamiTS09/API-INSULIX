@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
     agregarLectura,
+    agregarLecturaSimulada,
     getGraficas,
     getHistorialPaciente,
     getLecturaActual,
@@ -56,6 +57,23 @@ router.post(
     '/glucosa',
     requireRole(['MEDICO', 'PACIENTE', 'ADMIN']),
     agregarLectura
+);
+
+/**
+ * @swagger
+ * /reportes/glucosa/simulada:
+ *   post:
+ *     summary: Simular y guardar una medicion para el paciente autenticado
+ *     description: Crea o reutiliza un sensor simulado y registra 108 mg/dL con origen SIMULADOR.
+ *     tags: [Glucosa]
+ *     responses:
+ *       201:
+ *         description: Lectura simulada guardada
+ */
+router.post(
+    '/glucosa/simulada',
+    requireRole(['PACIENTE']),
+    agregarLecturaSimulada
 );
 
 /**

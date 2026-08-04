@@ -1,10 +1,13 @@
 import { Response } from 'express';
+import { PoolClient } from 'pg';
 import { pool } from '../models/db';
 import { AuthRequest, AuthUser } from '../middlewares/jwt.middleware';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MIN_GLUCOSE = 20;
 const MAX_GLUCOSE = 600;
+const SIMULATED_GLUCOSE = 108;
+const SIMULATED_SENSOR_MODEL = 'Simulador INSULIX';
 
 const canAccessPatient = async (patientId: string, user?: AuthUser): Promise<boolean> => {
     if (!user?.uid || !user.role) return false;
@@ -72,6 +75,46 @@ const getSensor = async (sensorId: string) => {
         [sensorId]
     );
     return result.rows[0] ?? null;
+};
+
+const getOrCreateSimulatedSensor = async (client: PoolClient, patientId: string) => {
+    // Evita crear dos sensores si llegan dos solicitudes simultaneas del mismo paciente.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [patientId]);
+
+    const existing = await client.query(
+        `SELECT sensor_id, paciente_id, numero_serie, modelo, activo, es_simulado
+         FROM dispositivo_sensor
+         WHERE paciente_id = $1
+           AND es_simulado = TRUE
+         ORDER BY activo DESC, fecha_activacion DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [patientId]
+    );
+
+    if (existing.rowCount === 1) {
+        const sensor = existing.rows[0];
+        if (!sensor.activo) {
+            const reactivated = await client.query(
+                `UPDATE dispositivo_sensor
+                 SET activo = TRUE, fecha_desactivacion = NULL
+                 WHERE sensor_id = $1
+                 RETURNING sensor_id, paciente_id, numero_serie, modelo, activo, es_simulado`,
+                [sensor.sensor_id]
+            );
+            return reactivated.rows[0];
+        }
+        return sensor;
+    }
+
+    const created = await client.query(
+        `INSERT INTO dispositivo_sensor
+            (paciente_id, numero_serie, modelo, fecha_activacion, activo, es_simulado)
+         VALUES ($1, CONCAT('SIM-', uuid_generate_v4()::TEXT), $2, CURRENT_TIMESTAMP, TRUE, TRUE)
+         RETURNING sensor_id, paciente_id, numero_serie, modelo, activo, es_simulado`,
+        [patientId, SIMULATED_SENSOR_MODEL]
+    );
+    return created.rows[0];
 };
 
 export const registrarSensor = async (req: AuthRequest, res: Response) => {
@@ -212,6 +255,49 @@ export const agregarLectura = async (req: AuthRequest, res: Response) => {
         return res.status(201).json(serializeReading(result.rows[0]));
     } catch (error: any) {
         return res.status(500).json({ error: 'Error agregando la lectura de glucosa', details: error.message });
+    }
+};
+
+export const agregarLecturaSimulada = async (req: AuthRequest, res: Response) => {
+    const client = await pool.connect();
+    try {
+        // Esta ruta representa exclusivamente el flujo visual de prueba de la app.
+        const patientId = String(req.user?.uid ?? '').trim();
+        if (!patientId || req.user?.role !== 'PACIENTE') {
+            return res.status(403).json({
+                message: 'La simulacion solo puede iniciarse desde la cuenta del paciente'
+            });
+        }
+        if (!await canAccessPatient(patientId, req.user)) {
+            return res.status(403).json({ message: 'No tienes acceso a este paciente' });
+        }
+
+        await client.query('BEGIN');
+        const sensor = await getOrCreateSimulatedSensor(client, patientId);
+        const measuredAt = new Date();
+        const result = await client.query(
+            `INSERT INTO historial_glucosa
+                (paciente_id, sensor_id, valor_mgdl, fecha_hora, registrado_por, origen)
+             VALUES ($1, $2, $3, $4, NULL, 'SIMULADOR')
+             RETURNING *`,
+            [patientId, sensor.sensor_id, SIMULATED_GLUCOSE, measuredAt.toISOString()]
+        );
+        await client.query('COMMIT');
+
+        return res.status(201).json(serializeReading({
+            ...result.rows[0],
+            numero_serie: sensor.numero_serie,
+            modelo: sensor.modelo,
+            es_simulado: true
+        }));
+    } catch (error: any) {
+        await client.query('ROLLBACK');
+        return res.status(500).json({
+            error: 'Error guardando la lectura simulada',
+            details: error.message
+        });
+    } finally {
+        client.release();
     }
 };
 
