@@ -30,6 +30,10 @@ export const initializeDatabase = async (): Promise<void> => {
     await pool.query(`
         CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+        DO $$ BEGIN
+            CREATE TYPE glucosa_origen AS ENUM ('SENSOR', 'MEDICO', 'PACIENTE', 'SIMULADOR');
+        EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
         CREATE TABLE IF NOT EXISTS dispositivo_sensor (
             sensor_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             paciente_id VARCHAR(50) NOT NULL REFERENCES detalle_paciente(paciente_id) ON DELETE CASCADE,
@@ -48,19 +52,27 @@ export const initializeDatabase = async (): Promise<void> => {
 
         CREATE TABLE IF NOT EXISTS historial_glucosa (
             lectura_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            sensor_id UUID NOT NULL REFERENCES dispositivo_sensor(sensor_id) ON DELETE CASCADE,
+            paciente_id VARCHAR(50) NOT NULL REFERENCES detalle_paciente(paciente_id) ON DELETE CASCADE,
+            sensor_id UUID REFERENCES dispositivo_sensor(sensor_id) ON DELETE RESTRICT,
             valor_mgdl DECIMAL(5,2) NOT NULL,
             fecha_hora TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            fecha_registro TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            fecha_registro TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            registrado_por VARCHAR(50) REFERENCES usuario(usuario_id) ON DELETE SET NULL,
+            origen glucosa_origen NOT NULL
         );
 
         ALTER TABLE historial_glucosa
-            ADD COLUMN IF NOT EXISTS fecha_registro TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP;
+            ADD COLUMN IF NOT EXISTS fecha_registro TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            ADD COLUMN IF NOT EXISTS paciente_id VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS registrado_por VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS origen glucosa_origen;
 
         CREATE INDEX IF NOT EXISTS idx_sensor_paciente
             ON dispositivo_sensor(paciente_id);
         CREATE INDEX IF NOT EXISTS idx_historial_sensor_fecha
             ON historial_glucosa(sensor_id, fecha_hora DESC);
+        CREATE INDEX IF NOT EXISTS idx_historial_glucosa_paciente_fecha
+            ON historial_glucosa(paciente_id, fecha_hora DESC);
         CREATE INDEX IF NOT EXISTS idx_historial_fecha
             ON historial_glucosa(fecha_hora DESC);
         CREATE UNIQUE INDEX IF NOT EXISTS uq_historial_glucosa_sensor_fecha
@@ -86,6 +98,17 @@ export const initializeDatabase = async (): Promise<void> => {
                 ALTER TABLE dispositivo_sensor
                     ADD CONSTRAINT dispositivo_sensor_fechas_validas
                     CHECK (fecha_desactivacion IS NULL OR fecha_desactivacion >= fecha_activacion);
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'historial_glucosa_origen_sensor_valido'
+            ) THEN
+                ALTER TABLE historial_glucosa
+                    ADD CONSTRAINT historial_glucosa_origen_sensor_valido CHECK (
+                        (origen IN ('SENSOR', 'SIMULADOR') AND sensor_id IS NOT NULL)
+                        OR (origen IN ('MEDICO', 'PACIENTE') AND sensor_id IS NULL)
+                    ) NOT VALID;
             END IF;
         END $$;
     `);

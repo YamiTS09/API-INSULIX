@@ -133,8 +133,15 @@ router.put('/medico/:id', authenticateJWT, upload.single('foto'), updateMedico);
  *               tipo_diabetes:
  *                 type: string
  *                 enum: [Tipo 1, Tipo 2, Gestacional, Otro]
- *               glucosa_base:
+ *               glucosa_inicial:
  *                 type: number
+ *                 minimum: 20
+ *                 maximum: 600
+ *                 description: MediciÃ³n inicial opcional, registrada en el historial de glucosa sin sensor
+ *               glucosa_fecha_medicion:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Fecha opcional de la mediciÃ³n inicial de glucosa
  *               peso:
  *                 type: number
  *                 description: Medición inicial opcional, registrada en el historial de peso
@@ -224,8 +231,6 @@ router.get('/paciente', authenticateJWT, getPacientes);
  *               tipo_diabetes:
  *                 type: string
  *                 enum: [Tipo 1, Tipo 2, Gestacional, Otro]
- *               glucosa_base:
- *                 type: number
  *               estatura:
  *                 type: number
  *               telefono:

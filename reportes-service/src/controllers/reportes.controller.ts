@@ -153,39 +153,57 @@ export const agregarLectura = async (req: AuthRequest, res: Response) => {
         }
 
         let sensor: any = null;
+        let patientId = '';
+        let origin: 'SENSOR' | 'MEDICO' | 'PACIENTE' | 'SIMULADOR';
+        let registeredBy: string | null = null;
+
         if (req.body.sensor_id) {
             sensor = await getSensor(String(req.body.sensor_id));
-        } else if (req.body.paciente_id) {
-            const sensorResult = await pool.query(
-                `SELECT sensor_id, paciente_id, numero_serie, modelo, fecha_activacion,
-                        fecha_desactivacion, activo, es_simulado
-                 FROM dispositivo_sensor
-                 WHERE paciente_id = $1 AND activo = TRUE
-                 ORDER BY fecha_activacion DESC
-                 LIMIT 1`,
-                [String(req.body.paciente_id)]
-            );
-            sensor = sensorResult.rows[0] ?? null;
+            if (!sensor) {
+                return res.status(404).json({ message: 'No se encontro el sensor indicado' });
+            }
+            if (!sensor.activo) {
+                return res.status(409).json({ message: 'El sensor esta desactivado' });
+            }
+            patientId = sensor.paciente_id;
+            origin = sensor.es_simulado ? 'SIMULADOR' : 'SENSOR';
+        } else {
+            if (req.user?.role === 'ADMIN') {
+                return res.status(403).json({
+                    message: 'Un administrador no puede registrar una lectura manual'
+                });
+            }
+
+            patientId = req.user?.role === 'PACIENTE'
+                ? String(req.user.uid)
+                : String(req.body.paciente_id ?? '').trim();
+            if (!patientId) {
+                return res.status(400).json({
+                    message: 'paciente_id es obligatorio para una lectura manual del medico'
+                });
+            }
+            origin = req.user?.role === 'MEDICO' ? 'MEDICO' : 'PACIENTE';
+            registeredBy = req.user?.uid ?? null;
         }
 
-        if (!sensor) {
-            return res.status(404).json({
-                message: 'No se encontro un sensor. Registra uno o envia un sensor_id valido'
-            });
-        }
-        if (!sensor.activo) {
-            return res.status(409).json({ message: 'El sensor esta desactivado' });
-        }
-        if (!await canAccessPatient(sensor.paciente_id, req.user)) {
+        if (!await canAccessPatient(patientId, req.user)) {
             return res.status(403).json({ message: 'No tienes acceso a este paciente' });
         }
 
         const result = await pool.query(
-            `INSERT INTO historial_glucosa (sensor_id, valor_mgdl, fecha_hora)
-             VALUES ($1, $2, $3)
+            `INSERT INTO historial_glucosa
+                (paciente_id, sensor_id, valor_mgdl, fecha_hora, registrado_por, origen)
+             VALUES ($1, $2, $3, $4, $5, $6)
              ON CONFLICT (sensor_id, fecha_hora) DO NOTHING
-             RETURNING *, $4::VARCHAR AS paciente_id`,
-            [sensor.sensor_id, glucose, measuredAt.toISOString(), sensor.paciente_id]
+             RETURNING *`,
+            [
+                patientId,
+                sensor?.sensor_id ?? null,
+                glucose,
+                measuredAt.toISOString(),
+                registeredBy,
+                origin
+            ]
         );
 
         if (result.rowCount === 0) {
@@ -219,10 +237,11 @@ export const getHistorialPaciente = async (req: AuthRequest, res: Response) => {
         const offset = Number.isFinite(parsedOffset) ? Math.max(parsedOffset, 0) : 0;
 
         const result = await pool.query(
-            `SELECT hg.*, ds.paciente_id, ds.numero_serie, ds.modelo, ds.es_simulado
+            `SELECT hg.*, ds.numero_serie, ds.modelo,
+                    COALESCE(ds.es_simulado, hg.origen = 'SIMULADOR') AS es_simulado
              FROM historial_glucosa hg
-             JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
-             WHERE ds.paciente_id = $1
+             LEFT JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
+             WHERE hg.paciente_id = $1
                AND ($2::TIMESTAMPTZ IS NULL OR hg.fecha_hora >= $2)
                AND ($3::TIMESTAMPTZ IS NULL OR hg.fecha_hora <= $3)
              ORDER BY hg.fecha_hora DESC
@@ -243,10 +262,11 @@ export const getLecturaActual = async (req: AuthRequest, res: Response) => {
         }
 
         const result = await pool.query(
-            `SELECT hg.*, ds.paciente_id, ds.numero_serie, ds.modelo, ds.es_simulado
+            `SELECT hg.*, ds.numero_serie, ds.modelo,
+                    COALESCE(ds.es_simulado, hg.origen = 'SIMULADOR') AS es_simulado
              FROM historial_glucosa hg
-             JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
-             WHERE ds.paciente_id = $1
+             LEFT JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
+             WHERE hg.paciente_id = $1
              ORDER BY hg.fecha_hora DESC, hg.fecha_registro DESC
              LIMIT 1`,
             [patientId]
@@ -267,9 +287,8 @@ export const updateLectura = async (req: AuthRequest, res: Response) => {
         }
 
         const currentResult = await pool.query(
-            `SELECT hg.lectura_id, ds.paciente_id
+            `SELECT lectura_id, paciente_id
              FROM historial_glucosa hg
-             JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
              WHERE hg.lectura_id = $1`,
             [readingId]
         );
@@ -346,8 +365,7 @@ export const getGraficas = async (req: AuthRequest, res: Response) => {
                     MIN(hg.valor_mgdl) AS minimo,
                     COUNT(*)::INT AS total_lecturas
              FROM historial_glucosa hg
-             JOIN dispositivo_sensor ds ON ds.sensor_id = hg.sensor_id
-             WHERE ds.paciente_id = $1
+             WHERE hg.paciente_id = $1
                AND ($2::TIMESTAMPTZ IS NULL OR hg.fecha_hora >= $2)
                AND ($3::TIMESTAMPTZ IS NULL OR hg.fecha_hora <= $3)`,
             [patientId, startDate?.toISOString() ?? null, endDate?.toISOString() ?? null]

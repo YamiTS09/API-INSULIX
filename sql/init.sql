@@ -11,6 +11,7 @@ CREATE TYPE sexo_tipo AS ENUM ('M', 'F', 'Otro');
 CREATE TYPE diabetes_tipo AS ENUM ('Tipo 1', 'Tipo 2', 'Gestacional', 'Otro');
 CREATE TYPE categoria_alimento AS ENUM ('Desayuno', 'Comida', 'Cena', 'Colación');
 CREATE TYPE peso_origen AS ENUM ('MEDICO', 'PACIENTE');
+CREATE TYPE glucosa_origen AS ENUM ('SENSOR', 'MEDICO', 'PACIENTE', 'SIMULADOR');
 
 -- =============================================
 -- MÓDULO A: SEGURIDAD Y ACCESO (RBAC UNIFICADO)
@@ -71,7 +72,6 @@ CREATE TABLE detalle_paciente (
     fecha_nacimiento DATE NOT NULL,
     sexo sexo_tipo NOT NULL,
     tipo_diabetes diabetes_tipo NOT NULL,
-    glucosa_base DECIMAL(5,2), -- Meta o base de glucosa mg/dL
     estatura DECIMAL(4,2),     -- en metros
     telefono VARCHAR(15) UNIQUE NOT NULL,
     direccion VARCHAR(255),
@@ -122,12 +122,19 @@ CREATE TABLE dispositivo_sensor (
 -- Historial continuo: cada medición es una fila y nunca reemplaza la anterior.
 CREATE TABLE historial_glucosa (
     lectura_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    sensor_id UUID NOT NULL REFERENCES dispositivo_sensor(sensor_id) ON DELETE CASCADE,
+    paciente_id VARCHAR(50) NOT NULL REFERENCES detalle_paciente(paciente_id) ON DELETE CASCADE,
+    sensor_id UUID REFERENCES dispositivo_sensor(sensor_id) ON DELETE RESTRICT,
     valor_mgdl DECIMAL(5,2) NOT NULL,
     fecha_hora TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     fecha_registro TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    registrado_por VARCHAR(50) REFERENCES usuario(usuario_id) ON DELETE SET NULL,
+    origen glucosa_origen NOT NULL,
     CONSTRAINT historial_glucosa_valor_valido
-        CHECK (valor_mgdl BETWEEN 20 AND 600)
+        CHECK (valor_mgdl BETWEEN 20 AND 600),
+    CONSTRAINT historial_glucosa_origen_sensor_valido CHECK (
+        (origen IN ('SENSOR', 'SIMULADOR') AND sensor_id IS NOT NULL)
+        OR (origen IN ('MEDICO', 'PACIENTE') AND sensor_id IS NULL)
+    )
 );
 
 
@@ -182,6 +189,8 @@ CREATE INDEX idx_paciente_medico ON detalle_paciente(medico_id);
 CREATE INDEX idx_historial_peso_paciente_fecha
     ON historial_peso(paciente_id, fecha_medicion DESC);
 CREATE INDEX idx_sensor_paciente ON dispositivo_sensor(paciente_id);
+CREATE INDEX idx_historial_glucosa_paciente_fecha
+    ON historial_glucosa(paciente_id, fecha_hora DESC);
 CREATE INDEX idx_historial_sensor_fecha
     ON historial_glucosa(sensor_id, fecha_hora DESC);
 CREATE INDEX idx_historial_fecha ON historial_glucosa(fecha_hora DESC);

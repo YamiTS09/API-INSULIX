@@ -150,7 +150,8 @@ export const createPaciente = async (req: AuthRequest, res: Response) => {
             uid, email, medico_id, 
             nombre, apellido_paterno, apellido_materno, 
             fecha_nacimiento, sexo, tipo_diabetes, 
-            glucosa_base, peso, peso_fecha_medicion, estatura, telefono, direccion
+            glucosa_inicial, glucosa_fecha_medicion,
+            peso, peso_fecha_medicion, estatura, telefono, direccion
         } = req.body;
 
         if (req.user?.uid !== medico_id) {
@@ -171,6 +172,25 @@ export const createPaciente = async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ message: 'La fecha de medición del peso no es válida' });
         }
         
+        const tieneGlucosaInicial = glucosa_inicial !== undefined &&
+            glucosa_inicial !== null && glucosa_inicial !== '';
+        const glucosaInicial = tieneGlucosaInicial ? Number(glucosa_inicial) : null;
+        if (tieneGlucosaInicial && (
+            !Number.isFinite(glucosaInicial) || glucosaInicial! < 20 || glucosaInicial! > 600
+        )) {
+            return res.status(400).json({ message: 'La glucosa debe estar entre 20 y 600 mg/dL' });
+        }
+
+        const fechaGlucosaInicial = glucosa_fecha_medicion
+            ? new Date(glucosa_fecha_medicion)
+            : new Date();
+        if (tieneGlucosaInicial && (
+            Number.isNaN(fechaGlucosaInicial.getTime()) ||
+            fechaGlucosaInicial.getTime() > Date.now() + (5 * 60 * 1000)
+        )) {
+            return res.status(400).json({ message: 'La fecha de medicion de glucosa no es valida' });
+        }
+
         console.log("DEBUG: Iniciando createPaciente para:", email, "con UID:", uid);
         let foto_url = req.body.foto_url;
         if (req.file && req.file.path) {
@@ -198,9 +218,9 @@ export const createPaciente = async (req: AuthRequest, res: Response) => {
         // 3. Insertar detalle paciente
         const pacienteRes = await client.query(
             `INSERT INTO detalle_paciente 
-            (paciente_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, estatura, telefono, direccion, foto_url) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-            [usuario_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, estatura, telefono, direccion, foto_url]
+            (paciente_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, estatura, telefono, direccion, foto_url)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+            [usuario_id, medico_id, fecha_nacimiento, sexo, tipo_diabetes, estatura, telefono, direccion, foto_url]
         );
 
         let pesoInicialRegistrado = null;
@@ -214,13 +234,26 @@ export const createPaciente = async (req: AuthRequest, res: Response) => {
             );
             pesoInicialRegistrado = pesoRes.rows[0];
         }
+
+        let glucosaInicialRegistrada = null;
+        if (tieneGlucosaInicial) {
+            const glucosaRes = await client.query(
+                `INSERT INTO historial_glucosa
+                (paciente_id, sensor_id, valor_mgdl, fecha_hora, registrado_por, origen)
+                VALUES ($1, NULL, $2, $3, $4, 'MEDICO')
+                RETURNING *`,
+                [usuario_id, glucosaInicial, fechaGlucosaInicial.toISOString(), req.user.uid]
+            );
+            glucosaInicialRegistrada = glucosaRes.rows[0];
+        }
         
         await client.query('COMMIT');
         res.status(201).json({
             usuario_id,
             email,
             detalle: pacienteRes.rows[0],
-            peso_inicial: pesoInicialRegistrado
+            peso_inicial: pesoInicialRegistrado,
+            glucosa_inicial: glucosaInicialRegistrada
         });
     } catch (error: any) {
         await client.query('ROLLBACK');
@@ -235,9 +268,19 @@ export const getPacientes = async (req: Request, res: Response) => {
         const medico_id = req.query.medico_id;
         
         let query = `
-            SELECT u.nombre, u.apellido_paterno, u.apellido_materno, u.email, u.fecha_registro, u.is_active, p.* 
+            SELECT u.nombre, u.apellido_paterno, u.apellido_materno, u.email,
+                   u.fecha_registro, u.is_active, p.*,
+                   ultima_glucosa.valor_mgdl AS glucosa_actual,
+                   ultima_glucosa.fecha_hora AS glucosa_fecha
             FROM detalle_paciente p 
-            JOIN usuario u ON p.paciente_id = u.usuario_id 
+            JOIN usuario u ON p.paciente_id = u.usuario_id
+            LEFT JOIN LATERAL (
+                SELECT hg.valor_mgdl, hg.fecha_hora
+                FROM historial_glucosa hg
+                WHERE hg.paciente_id = p.paciente_id
+                ORDER BY hg.fecha_hora DESC, hg.fecha_registro DESC
+                LIMIT 1
+            ) ultima_glucosa ON TRUE
             WHERE u.is_active = true
         `;
         let params: any[] = [];
@@ -258,9 +301,19 @@ export const getPacienteById = async (req: Request, res: Response) => {
      try {
          const { id } = req.params; // ID de Firebase (VARCHAR)
           const result = await pool.query(`
-            SELECT u.nombre, u.apellido_paterno, u.apellido_materno, u.email, u.fecha_registro, u.is_active, p.* 
+            SELECT u.nombre, u.apellido_paterno, u.apellido_materno, u.email,
+                   u.fecha_registro, u.is_active, p.*,
+                   ultima_glucosa.valor_mgdl AS glucosa_actual,
+                   ultima_glucosa.fecha_hora AS glucosa_fecha
             FROM detalle_paciente p 
-            JOIN usuario u ON p.paciente_id = u.usuario_id 
+            JOIN usuario u ON p.paciente_id = u.usuario_id
+            LEFT JOIN LATERAL (
+                SELECT hg.valor_mgdl, hg.fecha_hora
+                FROM historial_glucosa hg
+                WHERE hg.paciente_id = p.paciente_id
+                ORDER BY hg.fecha_hora DESC, hg.fecha_registro DESC
+                LIMIT 1
+            ) ultima_glucosa ON TRUE
             WHERE p.paciente_id = $1 AND u.is_active = true
           `, [id]);
          
@@ -280,7 +333,7 @@ export const updatePaciente = async (req: Request, res: Response) => {
          const { 
              nombre, apellido_paterno, apellido_materno, 
              fecha_nacimiento, sexo, tipo_diabetes, 
-             glucosa_base, estatura, telefono, direccion 
+             estatura, telefono, direccion
          } = req.body;
 
          let foto_url = req.body.foto_url;
@@ -306,13 +359,12 @@ export const updatePaciente = async (req: Request, res: Response) => {
                 fecha_nacimiento = COALESCE($1, fecha_nacimiento), 
                 sexo = COALESCE($2, sexo), 
                 tipo_diabetes = COALESCE($3, tipo_diabetes), 
-                glucosa_base = COALESCE($4, glucosa_base),
-                estatura = COALESCE($5, estatura),
-                telefono = COALESCE($6, telefono),
-                direccion = COALESCE($7, direccion),
-                foto_url = COALESCE($8, foto_url)
-             WHERE paciente_id = $9 RETURNING *`,
-            [fecha_nacimiento, sexo, tipo_diabetes, glucosa_base, estatura, telefono, direccion, foto_url, id]
+                estatura = COALESCE($4, estatura),
+                telefono = COALESCE($5, telefono),
+                direccion = COALESCE($6, direccion),
+                foto_url = COALESCE($7, foto_url)
+             WHERE paciente_id = $8 RETURNING *`,
+            [fecha_nacimiento, sexo, tipo_diabetes, estatura, telefono, direccion, foto_url, id]
         );
          
          if (result.rows.length === 0) {

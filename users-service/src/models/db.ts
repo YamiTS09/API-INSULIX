@@ -31,6 +31,10 @@ const initializeDb = async () => {
                 CREATE TYPE peso_origen AS ENUM ('MEDICO', 'PACIENTE');
             EXCEPTION WHEN duplicate_object THEN null; END $$;
 
+            DO $$ BEGIN
+                CREATE TYPE glucosa_origen AS ENUM ('SENSOR', 'MEDICO', 'PACIENTE', 'SIMULADOR');
+            EXCEPTION WHEN duplicate_object THEN null; END $$;
+
             -- MÓDULO A: SEGURIDAD Y ACCESO
             CREATE TABLE IF NOT EXISTS roles (
                 rol_id SERIAL PRIMARY KEY,
@@ -85,7 +89,6 @@ const initializeDb = async () => {
                 fecha_nacimiento DATE NOT NULL,
                 sexo sexo_tipo NOT NULL,
                 tipo_diabetes diabetes_tipo NOT NULL,
-                glucosa_base DECIMAL(5,2),
                 estatura DECIMAL(4,2),
                 telefono VARCHAR(15) UNIQUE NOT NULL,
                 direccion VARCHAR(255),
@@ -104,6 +107,45 @@ const initializeDb = async () => {
 
             CREATE INDEX IF NOT EXISTS idx_historial_peso_paciente_fecha
                 ON historial_peso(paciente_id, fecha_medicion DESC);
+
+            CREATE TABLE IF NOT EXISTS dispositivo_sensor (
+                sensor_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                paciente_id VARCHAR(50) NOT NULL REFERENCES detalle_paciente(paciente_id) ON DELETE CASCADE,
+                numero_serie VARCHAR(50) UNIQUE NOT NULL,
+                modelo VARCHAR(100),
+                fecha_activacion TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                fecha_desactivacion TIMESTAMPTZ,
+                activo BOOLEAN NOT NULL DEFAULT TRUE,
+                es_simulado BOOLEAN NOT NULL DEFAULT FALSE,
+                CONSTRAINT dispositivo_sensor_fechas_validas
+                    CHECK (fecha_desactivacion IS NULL OR fecha_desactivacion >= fecha_activacion)
+            );
+
+            CREATE TABLE IF NOT EXISTS historial_glucosa (
+                lectura_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                paciente_id VARCHAR(50) NOT NULL REFERENCES detalle_paciente(paciente_id) ON DELETE CASCADE,
+                sensor_id UUID REFERENCES dispositivo_sensor(sensor_id) ON DELETE RESTRICT,
+                valor_mgdl DECIMAL(5,2) NOT NULL,
+                fecha_hora TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                fecha_registro TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                registrado_por VARCHAR(50) REFERENCES usuario(usuario_id) ON DELETE SET NULL,
+                origen glucosa_origen NOT NULL,
+                CONSTRAINT historial_glucosa_valor_valido
+                    CHECK (valor_mgdl BETWEEN 20 AND 600),
+                CONSTRAINT historial_glucosa_origen_sensor_valido CHECK (
+                    (origen IN ('SENSOR', 'SIMULADOR') AND sensor_id IS NOT NULL)
+                    OR (origen IN ('MEDICO', 'PACIENTE') AND sensor_id IS NULL)
+                )
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sensor_paciente
+                ON dispositivo_sensor(paciente_id);
+
+            CREATE INDEX IF NOT EXISTS idx_historial_glucosa_paciente_fecha
+                ON historial_glucosa(paciente_id, fecha_hora DESC);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_historial_glucosa_sensor_fecha
+                ON historial_glucosa(sensor_id, fecha_hora);
 
             CREATE TABLE IF NOT EXISTS configuracion_usuario (
                 usuario_id VARCHAR(50) PRIMARY KEY REFERENCES usuario(usuario_id) ON DELETE CASCADE,

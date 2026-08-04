@@ -87,10 +87,11 @@ const insertReading = async (): Promise<void> => {
     const measuredAt = new Date();
     const glucose = generateReading(measuredAt);
     await pool.query(
-        `INSERT INTO historial_glucosa (sensor_id, valor_mgdl, fecha_hora)
-         VALUES ($1, $2, $3)
+        `INSERT INTO historial_glucosa
+            (paciente_id, sensor_id, valor_mgdl, fecha_hora, origen)
+         VALUES ($1, $2, $3, $4, 'SIMULADOR')
          ON CONFLICT (sensor_id, fecha_hora) DO NOTHING`,
-        [sensorId, glucose, measuredAt.toISOString()]
+        [patientId, sensorId, glucose, measuredAt.toISOString()]
     );
     console.log(`[${measuredAt.toISOString()}] ${glucose.toFixed(1)} mg/dL (${scenario})`);
 };
